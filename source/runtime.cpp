@@ -76,7 +76,6 @@ namespace reshade
 		imgui_io.KeyMap[ImGuiKey_X] = 'X';
 		imgui_io.KeyMap[ImGuiKey_Y] = 'Y';
 		imgui_io.KeyMap[ImGuiKey_Z] = 'Z';
-		imgui_io.ConfigFlags = ImGuiConfigFlags_NavEnableKeyboard;
 		imgui_style.WindowRounding = 0.0f;
 		imgui_style.WindowBorderSize = 0.0f;
 		imgui_style.ChildRounding = 0.0f;
@@ -100,6 +99,7 @@ namespace reshade
 		subscribe_to_menu("Statistics", [this]() { draw_overlay_menu_statistics(); });
 		subscribe_to_menu("Log", [this]() { draw_overlay_menu_log(); });
 		subscribe_to_menu("About", [this]() { draw_overlay_menu_about(); });
+		subscribe_to_menu("Code Editor", [this]() { _editor.render("code editor"); });
 	}
 	runtime::~runtime()
 	{

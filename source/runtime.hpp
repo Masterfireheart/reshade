@@ -10,6 +10,7 @@
 #include <filesystem>
 #include "ini_file.hpp"
 #include "runtime_objects.hpp"
+#include "gui_text_editor.hpp"
 
 #pragma region Forward Declarations
 struct ImDrawData;
@@ -294,5 +295,6 @@ namespace reshade
 		size_t _texture_count = 0;
 		size_t _uniform_count = 0;
 		size_t _technique_count = 0;
+		code_editor_widget _editor;
 	};
 }
