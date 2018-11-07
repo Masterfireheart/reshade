@@ -42,6 +42,100 @@ static inline std::vector<std::string> split(const std::string &str, char delim)
 	return result;
 }
 
+void reshade::runtime::init_overlay()
+{
+	auto &imgui_io = _imgui_context->IO;
+	auto &imgui_style = _imgui_context->Style;
+	imgui_io.IniFilename = nullptr;
+	imgui_io.KeyMap[ImGuiKey_Tab] = 0x09; // VK_TAB
+	imgui_io.KeyMap[ImGuiKey_LeftArrow] = 0x25; // VK_LEFT
+	imgui_io.KeyMap[ImGuiKey_RightArrow] = 0x27; // VK_RIGHT
+	imgui_io.KeyMap[ImGuiKey_UpArrow] = 0x26; // VK_UP
+	imgui_io.KeyMap[ImGuiKey_DownArrow] = 0x28; // VK_DOWN
+	imgui_io.KeyMap[ImGuiKey_PageUp] = 0x21; // VK_PRIOR
+	imgui_io.KeyMap[ImGuiKey_PageDown] = 0x22; // VK_NEXT
+	imgui_io.KeyMap[ImGuiKey_Home] = 0x24; // VK_HOME
+	imgui_io.KeyMap[ImGuiKey_End] = 0x23; // VK_END
+	imgui_io.KeyMap[ImGuiKey_Insert] = 0x2D; // VK_INSERT
+	imgui_io.KeyMap[ImGuiKey_Delete] = 0x2E; // VK_DELETE
+	imgui_io.KeyMap[ImGuiKey_Backspace] = 0x08; // VK_BACK
+	imgui_io.KeyMap[ImGuiKey_Space] = 0x20; // VK_SPACE
+	imgui_io.KeyMap[ImGuiKey_Enter] = 0x0D; // VK_RETURN
+	imgui_io.KeyMap[ImGuiKey_Escape] = 0x1B; // VK_ESCAPE
+	imgui_io.KeyMap[ImGuiKey_A] = 'A';
+	imgui_io.KeyMap[ImGuiKey_C] = 'C';
+	imgui_io.KeyMap[ImGuiKey_V] = 'V';
+	imgui_io.KeyMap[ImGuiKey_X] = 'X';
+	imgui_io.KeyMap[ImGuiKey_Y] = 'Y';
+	imgui_io.KeyMap[ImGuiKey_Z] = 'Z';
+	imgui_style.WindowRounding = 0.0f;
+	imgui_style.WindowBorderSize = 0.0f;
+	imgui_style.ChildRounding = 0.0f;
+	imgui_style.FrameRounding = 0.0f;
+	imgui_style.ScrollbarRounding = 0.0f;
+	imgui_style.GrabRounding = 0.0f;
+	imgui_io.ConfigFlags = ImGuiConfigFlags_DockingEnable;
+	imgui_io.ConfigResizeWindowsFromEdges = true;
+
+	ImGui::SetCurrentContext(nullptr);
+
+	imgui_io.Fonts->AddFontDefault();
+	const auto font_path = g_windows_path / "Fonts" / "consolab.ttf";
+	if (std::error_code ec; std::filesystem::exists(font_path, ec))
+		imgui_io.Fonts->AddFontFromFileTTF(font_path.u8string().c_str(), 18.0f);
+	else
+		imgui_io.Fonts->AddFontDefault();
+
+	subscribe_to_menu("Home", [this]() { draw_overlay_menu_home(); });
+	subscribe_to_menu("Settings", [this]() { draw_overlay_menu_settings(); });
+	subscribe_to_menu("Statistics", [this]() { draw_overlay_menu_statistics(); });
+	subscribe_to_menu("Log", [this]() { draw_overlay_menu_log(); });
+	subscribe_to_menu("About", [this]() { draw_overlay_menu_about(); });
+	subscribe_to_menu("Code Editor", [this]() {
+		if (!_effect_files.empty())
+		{
+			static size_t selected_file = 0;
+
+			if (ImGui::BeginCombo("File", _effect_files[selected_file].string().c_str()))
+			{
+				for (size_t i = 0; i < _effect_files.size(); ++i)
+				{
+					if (ImGui::Selectable(_effect_files[i].string().c_str(), selected_file == i))
+					{
+						selected_file = i;
+
+						std::ifstream file(_effect_files[i].wstring());
+						std::string filedata(std::istreambuf_iterator<char>(file.rdbuf()), std::istreambuf_iterator<char>());
+
+						_editor.set_text(filedata);
+					}
+				}
+
+				ImGui::EndCombo();
+			}
+
+			ImGui::SameLine();
+
+			if (ImGui::Button("Save & Compile"))
+			{
+				{std::string text = _editor.get_text();
+				std::ofstream file(_effect_files[selected_file].wstring(), std::ios::trunc);
+				file.write(text.c_str(), text.size());
+				}
+
+				unload_effect(_effect_files[selected_file]);
+				load_effect(_effect_files[selected_file]);
+				load_textures();
+				load_current_preset();
+			}
+		}
+
+		ImGui::PushFont(ImGui::GetIO().Fonts->Fonts[1]);
+		_editor.render("code editor");
+		ImGui::PopFont();
+	});
+}
+
 void reshade::runtime::draw_overlay()
 {
 	const bool show_splash = (_last_present_time - _last_reload_time) < std::chrono::seconds(5);
@@ -161,45 +255,48 @@ void reshade::runtime::draw_overlay()
 		ImGui::PopStyleColor();
 	}
 
-	ImGui::SetNextWindowPos(ImVec2(_width - 200.0f, 5));
-	ImGui::SetNextWindowSize(ImVec2(200.0f, 200.0f));
-	ImGui::PushFont(_imgui_context->IO.Fonts->Fonts[1]);
-	ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(_imgui_col_text_fps[0], _imgui_col_text_fps[1], _imgui_col_text_fps[2], 1.0f));
-	ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4());
-	ImGui::Begin("FPS", nullptr,
-		ImGuiWindowFlags_NoTitleBar |
-		ImGuiWindowFlags_NoScrollbar |
-		ImGuiWindowFlags_NoMove |
-		ImGuiWindowFlags_NoResize |
-		ImGuiWindowFlags_NoSavedSettings |
-		ImGuiWindowFlags_NoInputs |
-		ImGuiWindowFlags_NoFocusOnAppearing);
-
-	char temp[512];
-
-	if (_show_clock)
+	if (_show_clock || _show_framerate)
 	{
-		const int hour = _date[3] / 3600;
-		const int minute = (_date[3] - hour * 3600) / 60;
+		ImGui::SetNextWindowPos(ImVec2(_width - 200.0f, 5));
+		ImGui::SetNextWindowSize(ImVec2(200.0f, 200.0f));
+		ImGui::PushFont(_imgui_context->IO.Fonts->Fonts[1]);
+		ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(_imgui_col_text_fps[0], _imgui_col_text_fps[1], _imgui_col_text_fps[2], 1.0f));
+		ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4());
+		ImGui::Begin("FPS", nullptr,
+			ImGuiWindowFlags_NoTitleBar |
+			ImGuiWindowFlags_NoScrollbar |
+			ImGuiWindowFlags_NoMove |
+			ImGuiWindowFlags_NoResize |
+			ImGuiWindowFlags_NoSavedSettings |
+			ImGuiWindowFlags_NoInputs |
+			ImGuiWindowFlags_NoFocusOnAppearing);
 
-		ImFormatString(temp, sizeof(temp), " %02u:%02u", hour, minute);
-		ImGui::SetCursorPosX(ImGui::GetWindowContentRegionWidth() - ImGui::CalcTextSize(temp).x);
-		ImGui::TextUnformatted(temp);
+		char temp[512];
+
+		if (_show_clock)
+		{
+			const int hour = _date[3] / 3600;
+			const int minute = (_date[3] - hour * 3600) / 60;
+
+			ImFormatString(temp, sizeof(temp), " %02u:%02u", hour, minute);
+			ImGui::SetCursorPosX(ImGui::GetWindowContentRegionWidth() - ImGui::CalcTextSize(temp).x);
+			ImGui::TextUnformatted(temp);
+		}
+		if (_show_framerate && _imgui_context->IO.Framerate < 10000)
+		{
+			ImFormatString(temp, sizeof(temp), "%.0f fps", _imgui_context->IO.Framerate);
+			ImGui::SetCursorPosX(ImGui::GetWindowContentRegionWidth() - ImGui::CalcTextSize(temp).x);
+			ImGui::TextUnformatted(temp);
+
+			ImFormatString(temp, sizeof(temp), "%*lld ms", 3, std::chrono::duration_cast<std::chrono::milliseconds>(_last_frame_duration).count());
+			ImGui::SetCursorPosX(ImGui::GetWindowContentRegionWidth() - ImGui::CalcTextSize(temp).x);
+			ImGui::TextUnformatted(temp);
+		}
+
+		ImGui::End();
+		ImGui::PopStyleColor(2);
+		ImGui::PopFont();
 	}
-	if (_show_framerate && _imgui_context->IO.Framerate < 10000)
-	{
-		ImFormatString(temp, sizeof(temp), "%.0f fps", _imgui_context->IO.Framerate);
-		ImGui::SetCursorPosX(ImGui::GetWindowContentRegionWidth() - ImGui::CalcTextSize(temp).x);
-		ImGui::TextUnformatted(temp);
-
-		ImFormatString(temp, sizeof(temp), "%*lld ms", 3, std::chrono::duration_cast<std::chrono::milliseconds>(_last_frame_duration).count());
-		ImGui::SetCursorPosX(ImGui::GetWindowContentRegionWidth() - ImGui::CalcTextSize(temp).x);
-		ImGui::TextUnformatted(temp);
-	}
-
-	ImGui::End();
-	ImGui::PopStyleColor(2);
-	ImGui::PopFont();
 
 	if (_show_menu && _reload_remaining_effects == 0)
 	{
@@ -212,24 +309,33 @@ void reshade::runtime::draw_overlay()
 		}
 		else
 		{
-			ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_FirstUseEver);
-			ImGui::SetNextWindowSize(ImVec2(730.0f, _height - 40.0f), ImGuiCond_FirstUseEver);
-			ImGui::Begin("ReShade " VERSION_STRING_FILE " by crosire###Main", &_show_menu,
-				ImGuiWindowFlags_MenuBar |
-				ImGuiWindowFlags_NoCollapse);
+			const ImGuiID dockspace_id = ImGui::DockSpaceOverViewport(nullptr, ImGuiDockNodeFlags_PassthruDockspace);
 
-			// Double click the window title bar to reset position and size
-			const ImRect titlebar_rect = ImGui::GetCurrentWindow()->TitleBarRect();
-
-			if (ImGui::IsMouseDoubleClicked(0) && ImGui::IsMouseHoveringRect(titlebar_rect.Min, titlebar_rect.Max, false))
+			if (false)
 			{
-				ImGui::SetWindowPos(ImVec2(20, 20));
-				ImGui::SetWindowSize(ImVec2(730.0f, _height - 40.0f));
+				ImGuiID dock_main_id = dockspace_id; // This variable will track the document node, however we are not using it here as we aren't docking anything into it.
+				ImGuiID dock_id_left = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Left, 0.20f, NULL, &dock_main_id);
+				ImGuiID dock_id_right = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Right, 0.20f, NULL, &dock_main_id);
+				ImGuiID dock_id_bottom = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Down, 0.20f, NULL, &dock_main_id);
+
+				ImGui::DockBuilderDockWindow("Home", dock_id_left);
+				ImGui::DockBuilderDockWindow("Settings", dock_main_id);
+				ImGui::DockBuilderDockWindow("Statistics", dock_id_right);
+				ImGui::DockBuilderDockWindow("About", dock_id_bottom);
+				ImGui::DockBuilderFinish(dockspace_id);
 			}
 
-			draw_overlay_menu();
+			for (size_t i = 0; i < _menu_callables.size(); ++i)
+			{
+				const std::string &label = _menu_callables[i].first;
 
-			ImGui::End();
+				if (ImGui::Begin(label.c_str(), &_show_menu))
+				{
+					_menu_callables[i].second();
+				}
+
+				ImGui::End();
+			}
 		}
 	}
 
@@ -244,39 +350,7 @@ void reshade::runtime::draw_overlay()
 		render_imgui_draw_data(draw_data);
 	}
 }
-void reshade::runtime::draw_overlay_menu()
-{
-	if (ImGui::BeginMenuBar())
-	{
-		ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImGui::GetStyle().ItemSpacing * 2);
 
-		for (size_t i = 0; i < _menu_callables.size(); ++i)
-		{
-			const std::string &label = _menu_callables[i].first;
-
-			if (ImGui::Selectable(label.c_str(), _menu_index == i, 0, ImVec2(ImGui::CalcTextSize(label.c_str()).x, 0)))
-			{
-				_menu_index = i;
-				// Keep this 'true' for two frame to workaround 'ImGui::SetScrollHereY()' not working properly the first frame
-				_switched_menu = 2;
-			}
-
-			ImGui::SameLine();
-		}
-
-		ImGui::PopStyleVar();
-		ImGui::EndMenuBar();
-	}
-
-	ImGui::PushID(_menu_callables[_menu_index].first.c_str());
-
-	_menu_callables[_menu_index].second();
-
-	ImGui::PopID();
-
-	if (_switched_menu > 0)
-		--_switched_menu;
-}
 void reshade::runtime::draw_overlay_menu_home()
 {
 	if (!_effects_enabled)
@@ -1018,10 +1092,6 @@ void reshade::runtime::draw_overlay_menu_log()
 
 	clipper.End();
 
-	// Scroll to the bottom if the log tab was just opened
-	if (_switched_menu)
-		ImGui::SetScrollHereY();
-
 	ImGui::EndChild();
 }
 void reshade::runtime::draw_overlay_menu_about()
@@ -1313,11 +1383,11 @@ void reshade::runtime::draw_overlay_technique_editor()
 	bool current_tree_is_closed = true;
 	std::string current_filename;
 	char edit_buffer[2048];
-	const float toggle_key_text_offset = ImGui::GetWindowContentRegionWidth() - ImGui::CalcTextSize("Toggle Key").x - 201;
+	const float toggle_key_text_offset = ImGui::GetWindowContentRegionWidth() - 201;
 
 	_toggle_key_setting_active = false;
 
-	for (int id = 0, i = 0; id < static_cast<int>(_technique_count); id++, i++)
+	for (int id = 0, i = 0; id < static_cast<int>(_techniques.size()); id++, i++)
 	{
 		auto &technique = _techniques[id];
 
@@ -1358,8 +1428,6 @@ void reshade::runtime::draw_overlay_technique_editor()
 		memcpy(edit_buffer + offset, keyboard_keys[technique.toggle_key_data[0]], sizeof(*keyboard_keys));
 
 		ImGui::SameLine(toggle_key_text_offset);
-		ImGui::TextUnformatted("Toggle Key");
-		ImGui::SameLine();
 		ImGui::InputTextEx("##ToggleKey", edit_buffer, sizeof(edit_buffer), ImVec2(200, 0), ImGuiInputTextFlags_ReadOnly);
 
 		if (ImGui::IsItemActive())

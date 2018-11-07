@@ -52,54 +52,9 @@ namespace reshade
 
 		_needs_update = check_for_update(_latest_version);
 
-		auto &imgui_io = _imgui_context->IO;
-		auto &imgui_style = _imgui_context->Style;
-		imgui_io.IniFilename = nullptr;
-		imgui_io.KeyMap[ImGuiKey_Tab] = 0x09; // VK_TAB
-		imgui_io.KeyMap[ImGuiKey_LeftArrow] = 0x25; // VK_LEFT
-		imgui_io.KeyMap[ImGuiKey_RightArrow] = 0x27; // VK_RIGHT
-		imgui_io.KeyMap[ImGuiKey_UpArrow] = 0x26; // VK_UP
-		imgui_io.KeyMap[ImGuiKey_DownArrow] = 0x28; // VK_DOWN
-		imgui_io.KeyMap[ImGuiKey_PageUp] = 0x21; // VK_PRIOR
-		imgui_io.KeyMap[ImGuiKey_PageDown] = 0x22; // VK_NEXT
-		imgui_io.KeyMap[ImGuiKey_Home] = 0x24; // VK_HOME
-		imgui_io.KeyMap[ImGuiKey_End] = 0x23; // VK_END
-		imgui_io.KeyMap[ImGuiKey_Insert] = 0x2D; // VK_INSERT
-		imgui_io.KeyMap[ImGuiKey_Delete] = 0x2E; // VK_DELETE
-		imgui_io.KeyMap[ImGuiKey_Backspace] = 0x08; // VK_BACK
-		imgui_io.KeyMap[ImGuiKey_Space] = 0x20; // VK_SPACE
-		imgui_io.KeyMap[ImGuiKey_Enter] = 0x0D; // VK_RETURN
-		imgui_io.KeyMap[ImGuiKey_Escape] = 0x1B; // VK_ESCAPE
-		imgui_io.KeyMap[ImGuiKey_A] = 'A';
-		imgui_io.KeyMap[ImGuiKey_C] = 'C';
-		imgui_io.KeyMap[ImGuiKey_V] = 'V';
-		imgui_io.KeyMap[ImGuiKey_X] = 'X';
-		imgui_io.KeyMap[ImGuiKey_Y] = 'Y';
-		imgui_io.KeyMap[ImGuiKey_Z] = 'Z';
-		imgui_style.WindowRounding = 0.0f;
-		imgui_style.WindowBorderSize = 0.0f;
-		imgui_style.ChildRounding = 0.0f;
-		imgui_style.FrameRounding = 0.0f;
-		imgui_style.ScrollbarRounding = 0.0f;
-		imgui_style.GrabRounding = 0.0f;
-
-		ImGui::SetCurrentContext(nullptr);
-
-		imgui_io.Fonts->AddFontDefault();
-		const auto font_path = g_windows_path / "Fonts" / "consolab.ttf";
-		if (std::error_code ec; std::filesystem::exists(font_path, ec))
-			imgui_io.Fonts->AddFontFromFileTTF(font_path.u8string().c_str(), 18.0f);
-		else
-			imgui_io.Fonts->AddFontDefault();
+		init_overlay();
 
 		load_config();
-
-		subscribe_to_menu("Home", [this]() { draw_overlay_menu_home(); });
-		subscribe_to_menu("Settings", [this]() { draw_overlay_menu_settings(); });
-		subscribe_to_menu("Statistics", [this]() { draw_overlay_menu_statistics(); });
-		subscribe_to_menu("Log", [this]() { draw_overlay_menu_log(); });
-		subscribe_to_menu("About", [this]() { draw_overlay_menu_about(); });
-		subscribe_to_menu("Code Editor", [this]() { _editor.render("code editor"); });
 	}
 	runtime::~runtime()
 	{
@@ -668,6 +623,27 @@ namespace reshade
 			technique.toggle_key_data[3] = technique.annotations["togglealt"].as<bool>() ? 1 : 0;
 		}
 	}
+	void runtime::unload_effect(const std::filesystem::path &path)
+	{
+		for (auto it = _uniforms.begin(); it != _uniforms.end();)
+			if (it->effect_filename == path.filename().string())
+				it = _uniforms.erase(it);
+			else
+				++it;
+
+		for (auto it = _textures.begin(); it != _textures.end();)
+			if (it->effect_filename == path.filename().string())
+				it = _textures.erase(it);
+			else
+				++it;
+
+		for (auto it = _techniques.begin(); it != _techniques.end();)
+			if (it->effect_filename == path.filename().string())
+				it = _techniques.erase(it);
+			else
+				++it;
+	}
+
 	void runtime::load_textures()
 	{
 		LOG(INFO) << "Loading image files for textures ...";
